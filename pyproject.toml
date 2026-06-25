@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pix2pix-maps"
+version = "0.1.0"
+description = "A clean Pix2Pix implementation for the aligned Maps dataset."
+requires-python = ">=3.10"
+dependencies = [
+    "Pillow",
+    "psutil",
+    "torch",
+    "torchvision",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+tracking = [
+    "wandb",
+]
+
+[project.scripts]
+pix2pix-download-maps = "pix2pix.data.download:main"
+pix2pix-train = "pix2pix.training.engine:train"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["pix2pix*"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

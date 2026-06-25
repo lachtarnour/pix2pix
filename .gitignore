@@ -1,0 +1,34 @@
+# OS files
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Local environment
+.venv/
+.env
+.env.*
+.vscode/
+
+# Data and generated training artifacts
+datasets/
+checkpoints/
+outputs/
+wandb/
+*.pth
+*.pt
+*.ckpt
+*.onnx
+
+# Notebooks
+.ipynb_checkpoints/
