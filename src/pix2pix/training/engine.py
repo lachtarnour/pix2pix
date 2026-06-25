@@ -43,9 +43,11 @@ def init_wandb(config: TrainConfig) -> None:
         project=config.wandb_project,
         name=config.wandb_run_name,
         config=config.to_wandb_config(),
+        save_code=False,
         settings=wandb.Settings(
             x_disable_stats=True,
             x_disable_machine_info=True,
+            disable_code=True,
         ),
     )
 
@@ -311,9 +313,6 @@ def train(config: TrainConfig = CONFIG) -> None:
         if config.sample_every > 0 and epoch % config.sample_every == 0:
             sample_path = config.output_dir / "samples" / f"epoch_{epoch:04d}.png"
             save_sample_images(generator, val_loader, device, sample_path)
-
-            if wandb is not None and wandb.run is not None:
-                wandb.log({"samples": wandb.Image(str(sample_path))}, step=global_step)
 
         if config.checkpoint_every > 0 and epoch % config.checkpoint_every == 0:
             checkpoint_path = config.checkpoint_dir / f"epoch_{epoch:04d}.pth"
