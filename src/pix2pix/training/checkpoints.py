@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
 import torch
 from torch import nn
 from torch.optim.lr_scheduler import LambdaLR
+
+
+LATEST_CHECKPOINT_NAME = "latest.pth"
 
 
 def save_checkpoint(
@@ -26,21 +28,22 @@ def save_checkpoint(
     """Save the full training state needed to resume training."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    torch.save(
-        {
-            "epoch": epoch,
-            "global_step": global_step,
-            "best_val_mae": best_val_mae,
-            "best_epoch": best_epoch,
-            "generator": generator.state_dict(),
-            "discriminator": discriminator.state_dict(),
-            "optimizer_g": optimizer_g.state_dict(),
-            "optimizer_d": optimizer_d.state_dict(),
-            "scheduler_g": scheduler_g.state_dict(),
-            "scheduler_d": scheduler_d.state_dict(),
-        },
-        output_path,
-    )
+    temporary_path = output_path.with_suffix(f"{output_path.suffix}.tmp")
+    checkpoint = {
+        "epoch": epoch,
+        "global_step": global_step,
+        "best_val_mae": best_val_mae,
+        "best_epoch": best_epoch,
+        "generator": generator.state_dict(),
+        "discriminator": discriminator.state_dict(),
+        "optimizer_g": optimizer_g.state_dict(),
+        "optimizer_d": optimizer_d.state_dict(),
+        "scheduler_g": scheduler_g.state_dict(),
+        "scheduler_d": scheduler_d.state_dict(),
+    }
+
+    torch.save(checkpoint, temporary_path)
+    temporary_path.replace(output_path)
 
 
 def load_checkpoint(
@@ -67,31 +70,11 @@ def load_checkpoint(
     return checkpoint
 
 
-def get_epoch_from_checkpoint_path(path: Path) -> int | None:
-    """Extract an epoch number from a checkpoint path like epoch_0020.pth."""
-    match = re.fullmatch(r"epoch_(\d+)\.pth", path.name)
+def find_resume_checkpoint(checkpoint_dir: Path) -> Path | None:
+    """Find the checkpoint used to resume training."""
+    latest_checkpoint = checkpoint_dir / LATEST_CHECKPOINT_NAME
 
-    if match is None:
-        return None
+    if latest_checkpoint.is_file():
+        return latest_checkpoint
 
-    return int(match.group(1))
-
-
-def find_last_periodic_checkpoint(checkpoint_dir: Path) -> Path | None:
-    """Find the most recent periodic checkpoint named epoch_XXXX.pth."""
-    if not checkpoint_dir.exists():
-        return None
-
-    checkpoint_paths: list[tuple[int, Path]] = []
-
-    for path in checkpoint_dir.glob("epoch_*.pth"):
-        epoch = get_epoch_from_checkpoint_path(path)
-
-        if epoch is not None:
-            checkpoint_paths.append((epoch, path))
-
-    if not checkpoint_paths:
-        return None
-
-    checkpoint_paths.sort(key=lambda item: item[0])
-    return checkpoint_paths[-1][1]
+    return None

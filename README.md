@@ -5,6 +5,10 @@ Maps dataset.
 
 The model uses a U-Net generator and a PatchGAN discriminator.
 
+## Example
+
+![Pix2Pix Maps input and output example](assets/pix2pix-maps-example.png)
+
 ## Installation
 
 ```bash
@@ -22,6 +26,8 @@ python scripts/download_dataset.py
 ```bash
 python scripts/train.py
 ```
+
+Training resumes from `checkpoints/maps_pix2pix/latest.pth` when available.
 
 ## Configuration
 

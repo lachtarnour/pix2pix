@@ -12,57 +12,25 @@ from pix2pix.models import (
     build_generator,
 )
 from pix2pix.training.checkpoints import (
-    find_last_periodic_checkpoint,
+    LATEST_CHECKPOINT_NAME,
+    find_resume_checkpoint,
     load_checkpoint,
     save_checkpoint,
 )
 from pix2pix.training.evaluation import evaluate
 from pix2pix.training.losses import make_labels_like
 from pix2pix.training.schedulers import linear_decay_scheduler
+from pix2pix.training.tracking import finish_wandb, init_wandb, log_to_wandb
 from pix2pix.utils.images import save_sample_images
 from pix2pix.utils.logging import configure_logging, log_metrics, logger
 from pix2pix.utils.runtime import get_device, set_requires_grad, set_seed
 from pix2pix.utils.system_metrics import collect_system_metrics
 
 
-try:
-    import wandb
-except ImportError:  # pragma: no cover - optional dependency
-    wandb = None
-
-
-def init_wandb(config: TrainConfig) -> None:
-    """Initialize Weights & Biases only when enabled."""
-    if not config.use_wandb:
-        return
-
-    if wandb is None:
-        raise ImportError("wandb is not installed. Install it with: pip install wandb")
-
-    wandb.init(
-        project=config.wandb_project,
-        name=config.wandb_run_name,
-        config=config.to_wandb_config(),
-        save_code=False,
-        settings=wandb.Settings(
-            x_disable_stats=True,
-            x_disable_machine_info=True,
-            disable_code=True,
-        ),
-    )
-
-
-def log_to_wandb(metrics: dict[str, float], step: int) -> None:
-    """Log metrics to Weights & Biases if a run is active."""
-    if wandb is not None and wandb.run is not None:
-        wandb.log(metrics, step=step)
-
-
 def train(config: TrainConfig = CONFIG) -> None:
     configure_logging()
     set_seed(config.seed)
     device = get_device()
-    init_wandb(config)
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
     config.checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -141,10 +109,10 @@ def train(config: TrainConfig = CONFIG) -> None:
     best_epoch = 0
     start_epoch = 1
 
-    last_checkpoint_path = find_last_periodic_checkpoint(config.checkpoint_dir)
+    last_checkpoint_path = find_resume_checkpoint(config.checkpoint_dir)
 
     if last_checkpoint_path is not None:
-        logger.info("Resuming from periodic checkpoint: %s", last_checkpoint_path)
+        logger.info("Resuming from checkpoint: %s", last_checkpoint_path)
         checkpoint = load_checkpoint(
             checkpoint_path=last_checkpoint_path,
             generator=generator,
@@ -170,7 +138,7 @@ def train(config: TrainConfig = CONFIG) -> None:
             best_val_mae,
         )
     else:
-        logger.info("No periodic checkpoint found. Starting from scratch.")
+        logger.info("No latest checkpoint found. Starting from scratch.")
 
     if start_epoch > total_epochs:
         logger.info(
@@ -179,6 +147,8 @@ def train(config: TrainConfig = CONFIG) -> None:
             total_epochs,
         )
         return
+
+    init_wandb(config)
 
     for epoch in range(start_epoch, total_epochs + 1):
         generator.train()
@@ -229,15 +199,6 @@ def train(config: TrainConfig = CONFIG) -> None:
             epoch_loss_g_l1 += loss_g_l1.item()
 
             if config.print_every > 0 and batch_index % config.print_every == 0:
-                step_metrics = {
-                    "step/loss_d": loss_d.item(),
-                    "step/loss_g": loss_g.item(),
-                    "step/loss_g_gan": loss_g_gan.item(),
-                    "step/loss_g_l1": loss_g_l1.item(),
-                    "step/lr": optimizer_g.param_groups[0]["lr"],
-                }
-                step_metrics.update(collect_system_metrics(device))
-
                 logger.info(
                     "Epoch [%d/%d] Batch [%d/%d] "
                     "D: %.4f G: %.4f G_GAN: %.4f G_L1: %.4f",
@@ -250,7 +211,6 @@ def train(config: TrainConfig = CONFIG) -> None:
                     loss_g_gan.item(),
                     loss_g_l1.item(),
                 )
-                log_to_wandb(step_metrics, step=global_step)
 
         scheduler_g.step()
         scheduler_d.step()
@@ -265,8 +225,8 @@ def train(config: TrainConfig = CONFIG) -> None:
         }
 
         log_metrics(f"End epoch [{epoch}/{total_epochs}]", epoch_metrics)
-        log_to_wandb(epoch_metrics, step=global_step)
 
+        val_metrics = {}
         if config.eval_every > 0 and epoch % config.eval_every == 0:
             val_metrics = evaluate(
                 generator=generator,
@@ -279,7 +239,6 @@ def train(config: TrainConfig = CONFIG) -> None:
             )
 
             log_metrics(f"Validation epoch [{epoch}/{total_epochs}]", val_metrics)
-            log_to_wandb(val_metrics, step=global_step)
 
             current_val_mae = val_metrics["val/mae"]
 
@@ -305,16 +264,33 @@ def train(config: TrainConfig = CONFIG) -> None:
                     best_epoch,
                     best_val_mae,
                 )
-                log_to_wandb(
-                    {"best/epoch": best_epoch, "best/val_mae": best_val_mae},
-                    step=global_step,
-                )
 
         if config.sample_every > 0 and epoch % config.sample_every == 0:
             sample_path = config.output_dir / "samples" / f"epoch_{epoch:04d}.png"
             save_sample_images(generator, val_loader, device, sample_path)
 
-        if config.checkpoint_every > 0 and epoch % config.checkpoint_every == 0:
+        latest_checkpoint_path = config.checkpoint_dir / LATEST_CHECKPOINT_NAME
+        save_checkpoint(
+            generator=generator,
+            discriminator=discriminator,
+            optimizer_g=optimizer_g,
+            optimizer_d=optimizer_d,
+            scheduler_g=scheduler_g,
+            scheduler_d=scheduler_d,
+            epoch=epoch,
+            global_step=global_step,
+            best_val_mae=best_val_mae,
+            best_epoch=best_epoch,
+            output_path=latest_checkpoint_path,
+        )
+        logger.info("Latest checkpoint saved: %s", latest_checkpoint_path)
+
+        should_archive_checkpoint = (
+            config.checkpoint_archive_every > 0
+            and epoch % config.checkpoint_archive_every == 0
+        )
+
+        if should_archive_checkpoint:
             checkpoint_path = config.checkpoint_dir / f"epoch_{epoch:04d}.pth"
             save_checkpoint(
                 generator=generator,
@@ -329,10 +305,18 @@ def train(config: TrainConfig = CONFIG) -> None:
                 best_epoch=best_epoch,
                 output_path=checkpoint_path,
             )
-            logger.info("Periodic checkpoint saved: %s", checkpoint_path)
+            logger.info("Checkpoint archive saved: %s", checkpoint_path)
 
-    if wandb is not None and wandb.run is not None:
-        wandb.finish()
+        wandb_metrics = {
+            **epoch_metrics,
+            **val_metrics,
+            "best/epoch": best_epoch,
+            "best/val_mae": best_val_mae,
+        }
+        wandb_metrics.update(collect_system_metrics(device))
+        log_to_wandb(wandb_metrics, step=global_step)
+
+    finish_wandb()
 
     logger.info("Training finished.")
 

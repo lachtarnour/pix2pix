@@ -9,6 +9,7 @@ Direction = Literal["AtoB", "BtoA"]
 InitType = Literal["normal", "xavier", "kaiming", "orthogonal"]
 NormType = Literal["batch", "instance", "none"]
 Phase = Literal["train", "val", "test"]
+WandbResume = Literal["allow", "must", "never", "auto"]
 
 
 @dataclass(frozen=True)
@@ -25,7 +26,7 @@ class TrainConfig:
     # Training schedule
     epochs: int = 100
     epochs_decay: int = 100
-    batch_size: int = 32
+    batch_size: int = 1
     num_workers: int = 0
 
     # Optimizer
@@ -50,12 +51,15 @@ class TrainConfig:
     print_every: int = 100
     sample_every: int = 1
     eval_every: int = 1
-    checkpoint_every: int = 5
+    checkpoint_archive_every: int = 5
 
     # Weights & Biases
     use_wandb: bool = True
+    wandb_entity: str | None = None
     wandb_project: str = "pix2pix-maps"
     wandb_run_name: str = "pix2pix-maps"
+    wandb_run_id: str | None = None
+    wandb_resume: WandbResume = "allow"
 
     def to_dict(self) -> dict:
         config = asdict(self)
